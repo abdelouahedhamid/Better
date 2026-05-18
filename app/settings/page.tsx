@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { signOut } from 'firebase/auth'
+import { doc, getDoc } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,19 +22,25 @@ export default function SettingsPage() {
   const [reminderTime, setReminderTime] = useState('08:00')
   const [notifStatus, setNotifStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [notifMsg, setNotifMsg] = useState('')
-  const supabase = createClient()
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? '')
-    })
-    supabase.from('push_subscriptions').select('reminder_time').maybeSingle().then(({ data }) => {
-      if (data) {
+    const user = auth.currentUser
+    if (!user) return
+    setEmail(user.email ?? '')
+    getDoc(doc(db, 'users', user.uid, 'push_subscription', 'default')).then(snap => {
+      if (snap.exists()) {
         setNotifEnabled(true)
-        setReminderTime(data.reminder_time ?? '08:00')
+        setReminderTime(snap.data().reminder_time ?? '08:00')
       }
     })
   }, [])
+
+  async function authHeader(): Promise<Record<string, string>> {
+    const user = auth.currentUser
+    if (!user) return {}
+    const token = await user.getIdToken()
+    return { Authorization: `Bearer ${token}` }
+  }
 
   async function handleToggleNotifications(enabled: boolean) {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -43,7 +51,7 @@ export default function SettingsPage() {
     setNotifStatus('loading')
 
     if (!enabled) {
-      await fetch('/api/push/subscribe', { method: 'DELETE' })
+      await fetch('/api/push/subscribe', { method: 'DELETE', headers: await authHeader() })
       setNotifEnabled(false)
       setNotifStatus('done')
       setNotifMsg('Notifications disabled.')
@@ -64,12 +72,12 @@ export default function SettingsPage() {
 
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!) as unknown as BufferSource,
       })
 
       const res = await fetch('/api/push/subscribe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...await authHeader() },
         body: JSON.stringify({ subscription: sub.toJSON(), reminderTime }),
       })
 
@@ -80,7 +88,7 @@ export default function SettingsPage() {
       } else {
         throw new Error('Server error')
       }
-    } catch (e) {
+    } catch {
       setNotifMsg('Failed to enable notifications.')
       setNotifStatus('error')
     }
@@ -90,14 +98,14 @@ export default function SettingsPage() {
     if (!notifEnabled) return
     await fetch('/api/push/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...await authHeader() },
       body: JSON.stringify({ reminderTime }),
     })
     setNotifMsg('Reminder time updated.')
   }
 
   async function handleSignOut() {
-    await supabase.auth.signOut()
+    await signOut(auth)
     window.location.href = '/auth'
   }
 
@@ -105,7 +113,6 @@ export default function SettingsPage() {
     <div className="max-w-lg mx-auto px-4 py-6 space-y-8">
       <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
 
-      {/* Account */}
       <section className="space-y-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Account</p>
         <div className="rounded-xl border border-border/40 bg-card p-4 space-y-3">
@@ -119,7 +126,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Push Notifications */}
       <section className="space-y-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notifications</p>
         <div className="rounded-xl border border-border/40 bg-card p-4 space-y-4">
@@ -159,7 +165,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* About */}
       <section className="space-y-2">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">About</p>
         <div className="rounded-xl border border-border/40 bg-card p-4">

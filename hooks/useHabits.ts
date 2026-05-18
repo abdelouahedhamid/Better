@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { collection, query, where, getDocs, addDoc, setDoc, deleteDoc, doc, updateDoc, orderBy, Timestamp } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase/client'
 import type { Habit, HabitLog } from '@/types'
 import { today, formatDate } from '@/lib/utils'
 
@@ -10,81 +11,78 @@ export function useHabits() {
   const [todayLogs, setTodayLogs] = useState<HabitLog[]>([])
   const [allLogs, setAllLogs] = useState<HabitLog[]>([])
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
 
   const fetchData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const [habitsRes, logsRes, allLogsRes] = await Promise.all([
-      supabase
-        .from('habits')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('archived', false)
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('habit_logs')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('log_date', today()),
-      supabase
-        .from('habit_logs')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('log_date', (() => {
-          const d = new Date()
-          d.setDate(d.getDate() - 364)
-          return formatDate(d)
-        })()),
-    ])
+    const cutoff = (() => {
+      const d = new Date()
+      d.setDate(d.getDate() - 364)
+      return formatDate(d)
+    })()
 
-    setHabits(habitsRes.data ?? [])
-    setTodayLogs(logsRes.data ?? [])
-    setAllLogs(allLogsRes.data ?? [])
+    const habitsSnap = await getDocs(
+      query(
+        collection(db, 'users', user.uid, 'habits'),
+        where('archived', '==', false),
+        orderBy('created_at', 'asc')
+      )
+    )
+    const todayLogsSnap = await getDocs(
+      query(collection(db, 'users', user.uid, 'habit_logs'), where('log_date', '==', today()))
+    )
+    const allLogsSnap = await getDocs(
+      query(collection(db, 'users', user.uid, 'habit_logs'), where('log_date', '>=', cutoff))
+    )
+
+    setHabits(habitsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Habit)))
+    setTodayLogs(todayLogsSnap.docs.map(d => ({ id: d.id, ...d.data() } as HabitLog)))
+    setAllLogs(allLogsSnap.docs.map(d => ({ id: d.id, ...d.data() } as HabitLog)))
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   const toggleHabit = useCallback(async (habitId: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
     const existing = todayLogs.find(l => l.habit_id === habitId)
     if (existing) {
-      await supabase.from('habit_logs').delete().eq('id', existing.id)
+      await deleteDoc(doc(db, 'users', user.uid, 'habit_logs', existing.id))
       setTodayLogs(prev => prev.filter(l => l.id !== existing.id))
       setAllLogs(prev => prev.filter(l => l.id !== existing.id))
     } else {
-      const { data } = await supabase
-        .from('habit_logs')
-        .insert({ habit_id: habitId, user_id: user.id, log_date: today() })
-        .select()
-        .single()
-      if (data) {
-        setTodayLogs(prev => [...prev, data])
-        setAllLogs(prev => [...prev, data])
-      }
+      const logId = `${habitId}_${today()}`
+      const logData: Omit<HabitLog, 'id'> = { habit_id: habitId, user_id: user.uid, log_date: today() }
+      await setDoc(doc(db, 'users', user.uid, 'habit_logs', logId), logData)
+      const newLog = { id: logId, ...logData }
+      setTodayLogs(prev => [...prev, newLog])
+      setAllLogs(prev => [...prev, newLog])
     }
-  }, [todayLogs, supabase])
+  }, [todayLogs])
 
   const addHabit = useCallback(async (name: string, color: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { data } = await supabase
-      .from('habits')
-      .insert({ name, color, user_id: user.id })
-      .select()
-      .single()
-    if (data) setHabits(prev => [...prev, data])
-  }, [supabase])
+    const docRef = await addDoc(collection(db, 'users', user.uid, 'habits'), {
+      name,
+      color,
+      user_id: user.uid,
+      archived: false,
+      created_at: Timestamp.now(),
+    })
+    setHabits(prev => [...prev, { id: docRef.id, name, color, user_id: user.uid, archived: false } as Habit])
+  }, [])
 
   const archiveHabit = useCallback(async (habitId: string) => {
-    await supabase.from('habits').update({ archived: true }).eq('id', habitId)
+    const user = auth.currentUser
+    if (!user) return
+    await updateDoc(doc(db, 'users', user.uid, 'habits', habitId), { archived: true })
     setHabits(prev => prev.filter(h => h.id !== habitId))
-  }, [supabase])
+  }, [])
 
   const isCompletedToday = useCallback((habitId: string) => {
     return todayLogs.some(l => l.habit_id === habitId)

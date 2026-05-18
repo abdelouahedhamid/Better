@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { collection, query, where, getDocs, addDoc, setDoc, doc, orderBy, Timestamp } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase/client'
 import type { BadHabit, BadHabitLog, WeeklyStats } from '@/types'
 import { today, getISOWeek, getLast12Weeks } from '@/lib/utils'
 
@@ -10,10 +11,9 @@ export function useBadHabits() {
   const [todayLogs, setTodayLogs] = useState<BadHabitLog[]>([])
   const [allLogs, setAllLogs] = useState<BadHabitLog[]>([])
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
 
   const fetchData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
     const cutoff = (() => {
@@ -22,15 +22,15 @@ export function useBadHabits() {
       return d.toISOString().split('T')[0]
     })()
 
-    const [habitsRes, todayRes, allRes] = await Promise.all([
-      supabase.from('bad_habits').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
-      supabase.from('bad_habit_logs').select('*').eq('user_id', user.id).eq('log_date', today()),
-      supabase.from('bad_habit_logs').select('*').eq('user_id', user.id).gte('log_date', cutoff),
+    const [habitsSnap, todaySnap, allSnap] = await Promise.all([
+      getDocs(query(collection(db, 'users', user.uid, 'bad_habits'), orderBy('created_at', 'asc'))),
+      getDocs(query(collection(db, 'users', user.uid, 'bad_habit_logs'), where('log_date', '==', today()))),
+      getDocs(query(collection(db, 'users', user.uid, 'bad_habit_logs'), where('log_date', '>=', cutoff))),
     ])
 
-    setBadHabits(habitsRes.data ?? [])
-    setTodayLogs(todayRes.data ?? [])
-    setAllLogs(allRes.data ?? [])
+    setBadHabits(habitsSnap.docs.map(d => ({ id: d.id, ...d.data() } as BadHabit)))
+    setTodayLogs(todaySnap.docs.map(d => ({ id: d.id, ...d.data() } as BadHabitLog)))
+    setAllLogs(allSnap.docs.map(d => ({ id: d.id, ...d.data() } as BadHabitLog)))
     setLoading(false)
   }, [])
 
@@ -44,41 +44,37 @@ export function useBadHabits() {
     goal_frequency?: number
     goal_intensity?: number
   }) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { data } = await supabase
-      .from('bad_habits')
-      .insert({ ...habit, user_id: user.id, unit: habit.unit ?? 'times' })
-      .select()
-      .single()
-    if (data) setBadHabits(prev => [...prev, data])
-  }, [supabase])
+    const docRef = await addDoc(collection(db, 'users', user.uid, 'bad_habits'), {
+      ...habit,
+      user_id: user.uid,
+      unit: habit.unit ?? 'times',
+      created_at: Timestamp.now(),
+    })
+    setBadHabits(prev => [...prev, { id: docRef.id, ...habit, user_id: user.uid, unit: habit.unit ?? 'times' } as BadHabit])
+  }, [])
 
   const logToday = useCallback(async (badHabitId: string, didIt: boolean, quantity?: number, notes?: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { data } = await supabase
-      .from('bad_habit_logs')
-      .upsert(
-        { bad_habit_id: badHabitId, user_id: user.id, log_date: today(), did_it: didIt, quantity: didIt ? quantity : null, notes },
-        { onConflict: 'bad_habit_id,log_date' }
-      )
-      .select()
-      .single()
-
-    if (data) {
-      setTodayLogs(prev => {
-        const filtered = prev.filter(l => l.bad_habit_id !== badHabitId)
-        return [...filtered, data]
-      })
-      setAllLogs(prev => {
-        const filtered = prev.filter(l => !(l.bad_habit_id === badHabitId && l.log_date === today()))
-        return [...filtered, data]
-      })
+    const logId = `${badHabitId}_${today()}`
+    const logData: Omit<BadHabitLog, 'id'> = {
+      bad_habit_id: badHabitId,
+      user_id: user.uid,
+      log_date: today(),
+      did_it: didIt,
+      ...(didIt && quantity !== undefined ? { quantity } : {}),
+      ...(notes ? { notes } : {}),
     }
-  }, [supabase])
+    await setDoc(doc(db, 'users', user.uid, 'bad_habit_logs', logId), logData)
+    const newLog = { id: logId, ...logData }
+
+    setTodayLogs(prev => [...prev.filter(l => l.bad_habit_id !== badHabitId), newLog])
+    setAllLogs(prev => [...prev.filter(l => !(l.bad_habit_id === badHabitId && l.log_date === today())), newLog])
+  }, [])
 
   const getTodayLog = useCallback((badHabitId: string) => {
     return todayLogs.find(l => l.bad_habit_id === badHabitId)

@@ -33,7 +33,7 @@ export function AddHabitDialog({ onAdd, children }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogTrigger render={children as React.ReactElement} />
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>New Habit</DialogTitle>

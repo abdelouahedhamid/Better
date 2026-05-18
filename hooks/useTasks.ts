@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, orderBy, Timestamp } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase/client'
 import type { Task, Project } from '@/types'
 import { today } from '@/lib/utils'
 
@@ -10,29 +11,41 @@ export function useTasks() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedDate, setSelectedDate] = useState<string>(today())
-  const supabase = createClient()
 
   const fetchData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const [tasksRes, projectsRes] = await Promise.all([
-      supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', user.id)
-        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.lt.${selectedDate},completed.eq.false)`)
-        .order('time_start', { ascending: true, nullsFirst: false }),
-      supabase
-        .from('projects')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('archived', false)
-        .order('created_at', { ascending: true }),
+    const [tasksSnap, projectsSnap] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, 'users', user.uid, 'tasks'),
+          where('scheduled_date', '<=', selectedDate)
+        )
+      ),
+      getDocs(
+        query(
+          collection(db, 'users', user.uid, 'projects'),
+          where('archived', '==', false),
+          orderBy('created_at', 'asc')
+        )
+      ),
     ])
 
-    setTasks(tasksRes.data ?? [])
-    setProjects(projectsRes.data ?? [])
+    const rawTasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Task))
+    // Mirror Supabase OR: show tasks on selectedDate OR overdue+incomplete
+    const filtered = rawTasks.filter(t =>
+      t.scheduled_date === selectedDate ||
+      (t.scheduled_date !== undefined && t.scheduled_date < selectedDate && !t.completed)
+    )
+    const sorted = filtered.sort((a, b) => {
+      if (!a.time_start) return 1
+      if (!b.time_start) return -1
+      return a.time_start.localeCompare(b.time_start)
+    })
+
+    setTasks(sorted)
+    setProjects(projectsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Project)))
     setLoading(false)
   }, [selectedDate])
 
@@ -46,45 +59,56 @@ export function useTasks() {
     time_end?: string
     description?: string
   }) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { data } = await supabase
-      .from('tasks')
-      .insert({ ...task, user_id: user.id })
-      .select()
-      .single()
-    if (data) setTasks(prev => [...prev, data].sort((a, b) => {
+    const docRef = await addDoc(collection(db, 'users', user.uid, 'tasks'), {
+      ...task,
+      user_id: user.uid,
+      completed: false,
+      created_at: Timestamp.now(),
+    })
+    const newTask = { id: docRef.id, ...task, user_id: user.uid, completed: false } as Task
+    setTasks(prev => [...prev, newTask].sort((a, b) => {
       if (!a.time_start) return 1
       if (!b.time_start) return -1
       return a.time_start.localeCompare(b.time_start)
     }))
-  }, [supabase])
+  }, [])
 
   const completeTask = useCallback(async (taskId: string, completed: boolean) => {
-    await supabase
-      .from('tasks')
-      .update({ completed, completed_at: completed ? new Date().toISOString() : null })
-      .eq('id', taskId)
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed, completed_at: completed ? new Date().toISOString() : undefined } : t))
-  }, [supabase])
+    const user = auth.currentUser
+    if (!user) return
+    await updateDoc(doc(db, 'users', user.uid, 'tasks', taskId), {
+      completed,
+      completed_at: completed ? new Date().toISOString() : null,
+    })
+    setTasks(prev => prev.map(t => t.id === taskId
+      ? { ...t, completed, completed_at: completed ? new Date().toISOString() : undefined }
+      : t
+    ))
+  }, [])
 
   const deleteTask = useCallback(async (taskId: string) => {
-    await supabase.from('tasks').delete().eq('id', taskId)
+    const user = auth.currentUser
+    if (!user) return
+    await deleteDoc(doc(db, 'users', user.uid, 'tasks', taskId))
     setTasks(prev => prev.filter(t => t.id !== taskId))
-  }, [supabase])
+  }, [])
 
   const addProject = useCallback(async (name: string, color: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { data } = await supabase
-      .from('projects')
-      .insert({ name, color, user_id: user.id })
-      .select()
-      .single()
-    if (data) setProjects(prev => [...prev, data])
-  }, [supabase])
+    const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), {
+      name,
+      color,
+      user_id: user.uid,
+      archived: false,
+      created_at: Timestamp.now(),
+    })
+    setProjects(prev => [...prev, { id: docRef.id, name, color, user_id: user.uid, archived: false } as Project])
+  }, [])
 
   const todayTasks = tasks.filter(t => t.scheduled_date === today())
   const carriedOverTasks = tasks.filter(t => t.scheduled_date && t.scheduled_date < today() && !t.completed)

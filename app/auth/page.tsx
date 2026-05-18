@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
+import { auth } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,32 +15,35 @@ export default function AuthPage() {
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const supabase = createClient()
 
   async function handleEmailAuth(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setMessage('')
 
-    const { error } = isSignUp
-      ? await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}/auth/callback` } })
-      : await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      setMessage(error.message)
-    } else if (isSignUp) {
-      setMessage('Check your email to confirm your account.')
-    } else {
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, email, password)
+      } else {
+        await signInWithEmailAndPassword(auth, email, password)
+      }
       window.location.href = '/'
+    } catch (err: unknown) {
+      const error = err as { message?: string }
+      setMessage(error.message ?? 'Authentication failed')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   async function handleGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    })
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider())
+      window.location.href = '/'
+    } catch (err: unknown) {
+      const error = err as { message?: string }
+      setMessage(error.message ?? 'Google sign-in failed')
+    }
   }
 
   return (

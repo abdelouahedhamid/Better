@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { signOut } from 'firebase/auth'
+import { auth } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -17,10 +18,9 @@ const navItems = [
 
 export function Navbar() {
   const pathname = usePathname()
-  const supabase = createClient()
 
-  async function signOut() {
-    await supabase.auth.signOut()
+  async function handleSignOut() {
+    await signOut(auth)
     window.location.href = '/auth'
   }
 
@@ -46,7 +46,7 @@ export function Navbar() {
             ))}
           </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+        <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-muted-foreground">
           Sign out
         </Button>
       </div>

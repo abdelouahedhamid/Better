@@ -3,6 +3,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { Navbar } from "@/components/layout/Navbar"
 import { BottomNav } from "@/components/layout/BottomNav"
+import { AuthSync } from "@/components/AuthSync"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -20,6 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${inter.className} bg-background text-foreground min-h-screen`}>
+        <AuthSync />
         <Navbar />
         <main className="md:pt-14 pb-16 md:pb-0 min-h-screen">
           {children}
