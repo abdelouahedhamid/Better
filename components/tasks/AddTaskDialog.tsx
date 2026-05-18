@@ -53,7 +53,7 @@ export function AddTaskDialog({ projects, onAdd, children }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogTrigger render={children as React.ReactElement} />
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>New Task</DialogTitle>
@@ -74,7 +74,7 @@ export function AddTaskDialog({ projects, onAdd, children }: Props) {
           {projects.length > 0 && (
             <div className="space-y-1.5">
               <Label>Project</Label>
-              <Select value={projectId} onValueChange={setProjectId}>
+              <Select value={projectId} onValueChange={(val) => setProjectId(val ?? '')}>
                 <SelectTrigger>
                   <SelectValue placeholder="No project" />
                 </SelectTrigger>
