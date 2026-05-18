@@ -10,29 +10,33 @@ Self-improvement web app: build good habits, reduce bad habits (harm-reduction m
 npm run dev      # local dev server (localhost:3000)
 npm run build    # production build
 npm run lint     # ESLint check
+
+# Deploy Firestore security rules
+firebase deploy --only firestore:rules
 ```
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 14+ App Router + TypeScript |
+| Framework | Next.js 16 App Router + TypeScript |
 | Styling | Tailwind CSS v4 (CSS-based config, no tailwind.config.ts) |
-| UI | shadcn/ui v4.7.0, New York style, zinc base color |
-| Backend | Supabase — Auth + PostgreSQL + SSR cookies (`@supabase/ssr`) |
-| Charts | Recharts (LineChart, BarChart, ResponsiveContainer) |
-| Push | Web Push API + VAPID + `web-push` npm package (NOT Firebase) |
+| UI | shadcn/ui + Base UI (`@base-ui/react`) |
+| Auth | Firebase Auth (email/password + Google popup) |
+| Database | Firestore (subcollection-per-user) |
+| Push | Web Push API + VAPID + `web-push` npm package |
 | Hosting | Vercel |
 
-Dark mode: always-on via `<html className="dark">`. Tailwind v4 uses `@custom-variant dark` in globals.css, not a config file.
+Dark mode: always-on via `<html className="dark">`.
 
 ## Project Structure
 
 ```
 app/
-  layout.tsx                  Root layout — AuthGuard, Navbar, BottomNav
+  layout.tsx                  Root layout — AuthSync, Navbar, BottomNav
   page.tsx                    Dashboard (HabitsSection, TasksTimeBlocks, BadHabitsEODLog, DailyScore)
-  auth/page.tsx               Login / signup (email+password + Google OAuth)
+  auth/page.tsx               Login / signup (email+password + Google popup)
+  auth/callback/route.ts      Stub redirect → /auth (no code exchange needed)
   habits/page.tsx             Manage good habits
   bad-habits/page.tsx         Harm-reduction bad habit tracking
   tasks/page.tsx              Projects + time-blocked tasks
@@ -42,6 +46,7 @@ app/
   api/push/send/route.ts      Send push notification (Bearer CRON_SECRET auth)
 
 components/
+  AuthSync.tsx                onIdTokenChanged → writes __session cookie for middleware
   layout/Navbar.tsx           Desktop top nav (hidden md:flex)
   layout/BottomNav.tsx        Mobile bottom nav (md:hidden) — 5 items: Home/Habits/Tasks/Quit/Stats
   dashboard/HabitsSection.tsx Today's habits checklist
@@ -59,105 +64,129 @@ components/
 
 hooks/
   useHabits.ts      fetch, toggle, add, archive — streak computed client-side
-  useBadHabits.ts   fetch, logToday (upsert), getTodayLog, getWeeklyStats
+  useBadHabits.ts   fetch, logToday (upsert via setDoc), getTodayLog, getWeeklyStats
   useTasks.ts       fetch by date, add, complete, carry-over logic
   useAnalytics.ts   heatmap (84d), taskCompletion (12w), badHabitStats, weeklyScore
 
 lib/
-  supabase/client.ts    createBrowserClient (browser components)
-  supabase/server.ts    createServerClient (server components/routes)
+  firebase/client.ts    Firebase Auth + Firestore for client components
+  firebase/admin.ts     Firebase Admin SDK for API routes
   utils.ts              cn(), formatDate, today(), getISOWeek, getLast12Weeks, getLast84Days
 
-types/index.ts    Habit, HabitLog, BadHabit, BadHabitLog, Project, Task, WeeklyStats, DailyScore
+types/index.ts      Habit, HabitLog, BadHabit, BadHabitLog, Project, Task, WeeklyStats, DailyScore
 
-middleware.ts     Supabase auth session refresh + redirect unauthenticated → /auth
+proxy.ts            Middleware — checks __session cookie, redirects unauthenticated → /auth
+firestore.rules     Firestore security rules (users/{uid}/** = owner only)
+firebase.json       Points Firebase CLI to firestore.rules
 public/
-  manifest.json   PWA manifest (name: Better, background: #09090b)
-  sw.js           Service worker — push event + notificationclick handler
+  manifest.json     PWA manifest (name: Better, background: #09090b)
+  sw.js             Service worker — push event + notificationclick handler
 ```
 
-## Database Schema
+## Firebase Auth Flow
 
-```sql
--- All tables have RLS: user_id = auth.uid()
+1. Sign in via `app/auth/page.tsx` — `signInWithEmailAndPassword` or `signInWithPopup(auth, new GoogleAuthProvider())`
+2. `AuthSync.tsx` runs `onIdTokenChanged` → writes ID token to `__session` cookie (max-age 3600)
+3. `proxy.ts` middleware reads `__session` cookie — absent = redirect to `/auth`
+4. API routes verify identity: `adminAuth.verifyIdToken(req.headers.get('Authorization')?.slice(7))`
 
-habits(id UUID PK, user_id, name, color TEXT DEFAULT '#6366f1', icon TEXT, archived BOOL, created_at)
-habit_logs(id UUID PK, habit_id → habits, user_id, log_date DATE, UNIQUE(habit_id, log_date))
+**Edge Runtime note:** Middleware cannot use Firebase Admin. Cookie-only check in middleware; real enforcement is Firestore rules + API token verification.
 
-bad_habits(id UUID PK, user_id, name, unit TEXT DEFAULT 'times',
-  baseline_frequency INT, baseline_intensity NUMERIC,
-  goal_frequency INT, goal_intensity NUMERIC, created_at)
-bad_habit_logs(id UUID PK, bad_habit_id → bad_habits, user_id, log_date DATE,
-  did_it BOOL, quantity NUMERIC, notes TEXT, UNIQUE(bad_habit_id, log_date))
+## Firestore Structure
 
-projects(id UUID PK, user_id, name, color TEXT, archived BOOL, created_at)
-tasks(id UUID PK, user_id, project_id → projects, title, description TEXT,
-  scheduled_date DATE, time_start TIME, time_end TIME,
-  completed BOOL, completed_at TIMESTAMPTZ, created_at)
+```
+users/{uid}/
+  habits/{habitId}
+    name, color, user_id, archived, created_at
 
-push_subscriptions(id UUID PK, user_id UNIQUE, subscription JSONB, reminder_time TIME DEFAULT '08:00')
+  habit_logs/{habitId}_{date}           ← compound ID = upsert
+    habit_id, user_id, log_date
+
+  bad_habits/{badHabitId}
+    name, unit, user_id, baseline_frequency, baseline_intensity,
+    goal_frequency, goal_intensity, created_at
+
+  bad_habit_logs/{badHabitId}_{date}    ← compound ID = upsert
+    bad_habit_id, user_id, log_date, did_it, quantity?, notes?
+
+  projects/{projectId}
+    name, color, user_id, archived, created_at
+
+  tasks/{taskId}
+    title, description?, user_id, project_id?, scheduled_date?,
+    time_start?, time_end?, completed, completed_at?, created_at
+
+  push_subscription/default
+    subscription (VAPID JSON), reminder_time, updated_at
 ```
 
-## Required Environment Variables (.env.local)
+Security: `firestore.rules` — `users/{uid}/**` readable/writable only when `request.auth.uid == uid`.
+
+## Required Environment Variables
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=          # server-side only — NO NEXT_PUBLIC_ prefix
+# Firebase client SDK (public)
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
 
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=       # generate: npx web-push generate-vapid-keys
-VAPID_PRIVATE_KEY=                  # server-side only
+# Firebase Admin SDK (server-side only — never NEXT_PUBLIC_)
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=      # full PEM string with literal \n — from service account JSON
+
+# Push notifications
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:your@email.com
 
-CRON_SECRET=                        # random string, used to auth POST /api/push/send
+# Cron endpoint auth
+CRON_SECRET=
 ```
+
+## Firebase Console Setup Checklist
+
+- [ ] Authentication → Sign-in methods: enable **Email/Password** + **Google**
+- [ ] Authentication → Settings → **Authorized domains**: add Vercel deployment URL
+- [ ] Firestore Database → Rules: run `firebase deploy --only firestore:rules`
+- [ ] Project Settings → **Service Accounts** → Generate new private key → copy `FIREBASE_*` vars
+- [ ] Project Settings → General → **Your apps** (web) → copy `NEXT_PUBLIC_FIREBASE_*` vars
 
 ## Key Implementation Rules
 
 **Bad habits = harm reduction, not cold turkey**
-- `did_it = false` in bad_habit_logs = good (skipped). No streaks, no resets.
-- Progress = downward trend in frequency (days/week) + intensity (qty/session) over 12 weeks.
-- Analytics badHabitsScore = % logs where `did_it = false`.
+- `did_it = false` = good (skipped). No streaks, no resets.
+- Progress = downward trend in frequency + intensity over 12 weeks.
+- `badHabitsScore` = % logs where `did_it = false`.
 
 **Task carry-over**
-- Tasks with `scheduled_date < today` and `completed = false` appear in today's view with "carried over" badge.
-- No auto-mutation — just visual carry-over.
+- Tasks with `scheduled_date < today` and `completed = false` appear with "carried over" badge.
+- No auto-mutation — visual only.
 
 **Streak calc**
-- Computed client-side from `habit_logs` ordered by date — consecutive days ending today.
+- Computed client-side from `habit_logs` — consecutive days ending today.
 
-**Weekly score formula**
-- `(habitsScore × 0.4) + (tasksScore × 0.4) + (badHabitsScore × 0.2)`
-- Each score = ratio 0–1, multiplied to get 0–100 total.
+**Upsert in Firestore**
+- Use `setDoc` with deterministic compound doc ID `${entityId}_${date}` — overwrites same doc.
+
+**Weekly score**
+- `(habitsScore × 0.4) + (tasksScore × 0.4) + (badHabitsScore × 0.2)` — last 7 days window.
+
+**Firebase clients**
+- Browser hooks: `import { auth, db } from '@/lib/firebase/client'` — use `auth.currentUser` (sync)
+- API routes: `import { adminAuth, adminDb } from '@/lib/firebase/admin'`
 
 **Push notifications**
-- Service worker at `public/sw.js` handles `push` event → shows notification.
-- Subscribe flow in `settings/page.tsx`: permission → `pushManager.subscribe()` → `POST /api/push/subscribe`.
-- Send endpoint `POST /api/push/send` requires `Authorization: Bearer <CRON_SECRET>` header.
-- Body: `{ subscription, title, body, url }`.
-
-**Supabase clients**
-- Browser: `import { createClient } from '@/lib/supabase/client'`
-- Server (route handlers, server components): `import { createClient } from '@/lib/supabase/server'`
+- Client sends `Authorization: Bearer <idToken>` with every push API call.
+- Cron send endpoint requires `Authorization: Bearer <CRON_SECRET>`.
 
 **Navigation**
-- Desktop: Navbar (hidden md:flex) — Home / Habits / Tasks / Quit / Stats / Settings
-- Mobile: BottomNav (md:hidden) — 5 items with SVG icons, no Settings
-- Settings accessible on mobile via direct URL `/settings` only (or add to BottomNav if needed)
+- Desktop: Navbar (`hidden md:flex`) — Home / Habits / Tasks / Quit / Stats / Settings
+- Mobile: BottomNav (`md:hidden`) — 5 items, no Settings link
 
 **Tailwind v4 dark mode**
-- Use `dark:` prefix normally in classnames — works because `<html className="dark">` is set in layout.tsx.
-- No `tailwind.config.ts` exists — all config in CSS via `@import "tailwindcss"` and `@custom-variant dark`.
-
-## Build Status
-
-All 9 phases complete:
-- Phase 1: Bootstrap (Next.js, shadcn, Supabase, Tailwind v4)
-- Phase 2: Auth + Layout (middleware, login, Navbar, BottomNav)
-- Phase 3: Good Habits (useHabits, HabitCard, AddHabitDialog, habits/page)
-- Phase 4: Dashboard (HabitsSection, TasksTimeBlocks, BadHabitsEODLog, DailyScore)
-- Phase 5: Tasks (useTasks, ProjectSidebar, TimeBlockCard, AddTaskDialog, tasks/page)
-- Phase 6: Bad Habits (useBadHabits, BadHabitCard, ReductionChart, bad-habits/page)
-- Phase 7: Analytics (useAnalytics, analytics/page with heatmap + charts)
-- Phase 8: Push Notifications (subscribe/route, send/route, settings/page, sw.js)
-- Phase 9: PWA Polish (manifest.json, sw.js, loading skeletons, empty states, Navbar+BottomNav)
+- `dark:` prefix works because `<html className="dark">` is set in layout.tsx.
+- No `tailwind.config.ts` — all config in CSS.
