@@ -5,33 +5,24 @@ import { useTasks } from '@/hooks/useTasks'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import type { Task, Project } from '@/types'
+import type { Task } from '@/types'
 
-function formatTime(t: string): string {
-  const [h, m] = t.split(':')
-  const hour = parseInt(h)
-  const ampm = hour >= 12 ? 'pm' : 'am'
-  const display = hour % 12 || 12
-  return `${display}:${m}${ampm}`
-}
-
-function TaskRow({ task, project, onComplete }: { task: Task; project?: Project; onComplete: () => void }) {
+function TaskRow({ task, onComplete }: { task: Task; onComplete: () => void }) {
   const isCarried = task.scheduled_date && task.scheduled_date < new Date().toISOString().split('T')[0]
 
   return (
     <div className={cn(
-      'flex items-start gap-3 p-3 rounded-xl border transition-all',
+      'flex items-center gap-3 p-3 rounded-xl border transition-all',
       task.completed ? 'border-border/40 bg-secondary/20 opacity-60' : 'border-border/40 bg-card'
     )}>
       <button
         onClick={onComplete}
         className={cn(
-          'mt-0.5 h-4 w-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-all',
+          'h-4 w-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-all',
           task.completed
-            ? 'border-transparent'
+            ? 'bg-primary border-primary'
             : 'border-muted-foreground/40 hover:border-muted-foreground'
         )}
-        style={task.completed ? { backgroundColor: project?.color ?? '#6366f1' } : undefined}
       >
         {task.completed && (
           <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5">
@@ -40,33 +31,20 @@ function TaskRow({ task, project, onComplete }: { task: Task; project?: Project;
         )}
       </button>
 
-      <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium', task.completed && 'line-through text-muted-foreground')}>{task.title}</p>
-        <div className="flex items-center gap-2 mt-0.5">
-          {task.time_start && (
-            <span className="text-xs text-muted-foreground">
-              {formatTime(task.time_start)}{task.time_end ? ` – ${formatTime(task.time_end)}` : ''}
-            </span>
-          )}
-          {project && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: project.color }} />
-              {project.name}
-            </span>
-          )}
-          {isCarried && !task.completed && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-amber-500 border-amber-500/30">carried over</Badge>
-          )}
-        </div>
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <p className={cn('text-sm font-medium truncate', task.completed && 'line-through text-muted-foreground')}>
+          {task.title}
+        </p>
+        {isCarried && !task.completed && (
+          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-amber-500 border-amber-500/30 shrink-0">carried over</Badge>
+        )}
       </div>
     </div>
   )
 }
 
 export function TasksTimeBlocks() {
-  const { timedTasks, untimedTasks, carriedOverTasks, projects, loading, completeTask } = useTasks()
-
-  const getProject = (projectId?: string) => projects.find(p => p.id === projectId)
+  const { todayTasks, carriedOverTasks, loading, completeTask } = useTasks()
 
   if (loading) {
     return (
@@ -75,14 +53,13 @@ export function TasksTimeBlocks() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Today's Tasks</h2>
         </div>
         <div className="space-y-2">
-          {[1, 2].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}
+          {[1, 2].map(i => <Skeleton key={i} className="h-12 rounded-xl" />)}
         </div>
       </section>
     )
   }
 
-  const allToday = [...timedTasks, ...untimedTasks.filter(t => !carriedOverTasks.includes(t))]
-  const allTasks = [...allToday, ...carriedOverTasks.filter(t => !allToday.includes(t))]
+  const allTasks = [...todayTasks, ...carriedOverTasks.filter(t => !todayTasks.includes(t))]
 
   if (!allTasks.length) {
     return (
@@ -111,7 +88,6 @@ export function TasksTimeBlocks() {
           <TaskRow
             key={task.id}
             task={task}
-            project={getProject(task.project_id)}
             onComplete={() => completeTask(task.id, !task.completed)}
           />
         ))}

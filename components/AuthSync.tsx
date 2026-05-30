@@ -9,7 +9,7 @@ export function AuthSync() {
     const unsub = onIdTokenChanged(auth, async (user) => {
       if (user) {
         const token = await user.getIdToken()
-        document.cookie = `__session=${token}; path=/; max-age=3600; SameSite=Lax`
+        document.cookie = `__session=${token}; path=/; max-age=604800; SameSite=Lax`
       } else {
         document.cookie = '__session=; path=/; max-age=0'
       }

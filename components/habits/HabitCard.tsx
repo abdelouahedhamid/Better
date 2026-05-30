@@ -1,6 +1,5 @@
 'use client'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Habit } from '@/types'
@@ -8,12 +7,13 @@ import type { Habit } from '@/types'
 interface Props {
   habit: Habit
   completed: boolean
-  streak: number
+  weeklyRate: { count: number; total: number }
+  monthlyRate: { count: number; total: number }
   onToggle: () => void
   onArchive: () => void
 }
 
-export function HabitCard({ habit, completed, streak, onToggle, onArchive }: Props) {
+export function HabitCard({ habit, completed, weeklyRate, monthlyRate, onToggle, onArchive }: Props) {
   return (
     <div className={cn(
       'group flex items-center gap-3 p-4 rounded-xl border transition-all',
@@ -47,11 +47,18 @@ export function HabitCard({ habit, completed, streak, onToggle, onArchive }: Pro
         </p>
       </div>
 
-      {streak > 0 && (
-        <Badge variant="secondary" className="text-xs shrink-0">
-          🔥 {streak}
-        </Badge>
-      )}
+      <div className="flex items-center gap-2.5 shrink-0">
+        <span className="text-xs font-mono text-muted-foreground">
+          <span className={cn(weeklyRate.count === weeklyRate.total && 'text-foreground font-semibold')}>
+            {weeklyRate.count}
+          </span>
+          <span className="text-muted-foreground/40">/7</span>
+        </span>
+        <span className="text-xs font-mono text-muted-foreground">
+          <span>{monthlyRate.count}</span>
+          <span className="text-muted-foreground/40">/30</span>
+        </span>
+      </div>
 
       <Button
         variant="ghost"

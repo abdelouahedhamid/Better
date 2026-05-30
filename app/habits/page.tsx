@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export default function HabitsPage() {
-  const { habits, loading, toggleHabit, addHabit, archiveHabit, isCompletedToday, getStreak } = useHabits()
+  const { habits, loading, toggleHabit, addHabit, archiveHabit, isCompletedToday, getWeeklyRate, getMonthlyRate } = useHabits()
 
   const completedCount = habits.filter(h => isCompletedToday(h.id)).length
 
@@ -52,7 +52,8 @@ export default function HabitsPage() {
               key={habit.id}
               habit={habit}
               completed={isCompletedToday(habit.id)}
-              streak={getStreak(habit.id)}
+              weeklyRate={getWeeklyRate(habit.id)}
+              monthlyRate={getMonthlyRate(habit.id)}
               onToggle={() => toggleHabit(habit.id)}
               onArchive={() => archiveHabit(habit.id)}
             />

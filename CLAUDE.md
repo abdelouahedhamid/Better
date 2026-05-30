@@ -2,7 +2,7 @@
 
 # CLAUDE.md — Better App
 
-Self-improvement web app: build good habits, reduce bad habits (harm-reduction model), manage time-blocked tasks.
+Self-improvement web app organized around **multiple target identities** (e.g. Athlete, Entrepreneur, Monk). Users define identities first, then habits/tasks/analytics are scoped to them. Core pillars: build good habits, reduce bad habits (harm-reduction model), manage daily task checklists.
 
 ## Commands
 
@@ -33,13 +33,14 @@ Dark mode: always-on via `<html className="dark">`.
 
 ```
 app/
-  layout.tsx                  Root layout — AuthSync, Navbar, BottomNav
+  layout.tsx                  Root layout — AuthSync, AuthGuard, Navbar, BottomNav
   page.tsx                    Dashboard (HabitsSection, TasksTimeBlocks, BadHabitsEODLog, DailyScore)
-  auth/page.tsx               Login / signup (email+password + Google popup)
+  auth/page.tsx               Login / signup — after sign-in checks identity count → /onboarding or /
   auth/callback/route.ts      Stub redirect → /auth (no code exchange needed)
+  onboarding/page.tsx         First-run identity creation (shown only when user has 0 identities)
   habits/page.tsx             Manage good habits
   bad-habits/page.tsx         Harm-reduction bad habit tracking
-  tasks/page.tsx              Projects + time-blocked tasks
+  tasks/page.tsx              Daily task checklist — today's tasks + carried over
   analytics/page.tsx          Heatmap, charts, weekly score
   settings/page.tsx           Push notifications + account
   api/push/subscribe/route.ts Save VAPID subscription (POST=upsert, DELETE=remove)
@@ -50,7 +51,7 @@ components/
   layout/Navbar.tsx           Desktop top nav (hidden md:flex)
   layout/BottomNav.tsx        Mobile bottom nav (md:hidden) — 5 items: Home/Habits/Tasks/Quit/Stats
   dashboard/HabitsSection.tsx Today's habits checklist
-  dashboard/TasksTimeBlocks.tsx Time-blocked tasks for today
+  dashboard/TasksTimeBlocks.tsx Today's task checklist (today + carried over)
   dashboard/BadHabitsEODLog.tsx End-of-day bad habit log
   dashboard/DailyScore.tsx    Composite score widget
   habits/HabitCard.tsx        Check-in toggle + streak badge
@@ -58,12 +59,12 @@ components/
   bad-habits/BadHabitCard.tsx Frequency/intensity stats + EOD log dialog + chart dialog
   bad-habits/AddBadHabitDialog.tsx Add bad habit with baseline/goal fields
   bad-habits/ReductionChart.tsx Dual-axis LineChart (frequency left, intensity right)
-  tasks/TimeBlockCard.tsx     Time range + project color + complete toggle
-  tasks/ProjectSidebar.tsx    Project list + add project
-  tasks/AddTaskDialog.tsx     Add task with date + time block
+  tasks/TimeBlockCard.tsx     Task row — checkbox + title + carried badge + delete
+  tasks/AddTaskDialog.tsx     Add task with title + date only
 
 hooks/
-  useHabits.ts      fetch, toggle, add, archive — streak computed client-side
+  useIdentities.ts  fetch (ordered by order), add, update, delete, reorder
+  useHabits.ts      fetch, toggle, add (accepts identity_id?), archive — streak computed client-side
   useBadHabits.ts   fetch, logToday (upsert via setDoc), getTodayLog, getWeeklyStats
   useTasks.ts       fetch by date, add, complete, carry-over logic
   useAnalytics.ts   heatmap (84d), taskCompletion (12w), badHabitStats, weeklyScore
@@ -73,9 +74,8 @@ lib/
   firebase/admin.ts     Firebase Admin SDK for API routes
   utils.ts              cn(), formatDate, today(), getISOWeek, getLast12Weeks, getLast84Days
 
-types/index.ts      Habit, HabitLog, BadHabit, BadHabitLog, Project, Task, WeeklyStats, DailyScore
+types/index.ts      Identity, Habit, HabitLog, BadHabit, BadHabitLog, Task, WeeklyStats, DailyScore
 
-proxy.ts            Middleware — checks __session cookie, redirects unauthenticated → /auth
 firestore.rules     Firestore security rules (users/{uid}/** = owner only)
 firebase.json       Points Firebase CLI to firestore.rules
 public/
@@ -86,18 +86,20 @@ public/
 ## Firebase Auth Flow
 
 1. Sign in via `app/auth/page.tsx` — `signInWithEmailAndPassword` or `signInWithPopup(auth, new GoogleAuthProvider())`
-2. `AuthSync.tsx` runs `onIdTokenChanged` → writes ID token to `__session` cookie (max-age 3600)
-3. `proxy.ts` middleware reads `__session` cookie — absent = redirect to `/auth`
-4. API routes verify identity: `adminAuth.verifyIdToken(req.headers.get('Authorization')?.slice(7))`
-
-**Edge Runtime note:** Middleware cannot use Firebase Admin. Cookie-only check in middleware; real enforcement is Firestore rules + API token verification.
+2. After sign-in, check `users/{uid}/identities` count (limit 1) — redirect to `/onboarding` if empty, else `/`
+3. `AuthSync.tsx` runs `onIdTokenChanged` → writes ID token to `__session` cookie (max-age 604800)
+4. `AuthGuard` component (in layout) handles client-side auth gating — no middleware file
+5. API routes verify identity: `adminAuth.verifyIdToken(req.headers.get('Authorization')?.slice(7))`
 
 ## Firestore Structure
 
 ```
 users/{uid}/
+  identities/{identityId}
+    name, description, target_vision, color, icon, order, user_id, created_at
+
   habits/{habitId}
-    name, color, user_id, archived, created_at
+    name, color, user_id, archived, created_at, identity_id?
 
   habit_logs/{habitId}_{date}           ← compound ID = upsert
     habit_id, user_id, log_date
@@ -109,12 +111,9 @@ users/{uid}/
   bad_habit_logs/{badHabitId}_{date}    ← compound ID = upsert
     bad_habit_id, user_id, log_date, did_it, quantity?, notes?
 
-  projects/{projectId}
-    name, color, user_id, archived, created_at
-
   tasks/{taskId}
-    title, description?, user_id, project_id?, scheduled_date?,
-    time_start?, time_end?, completed, completed_at?, created_at
+    title, description?, user_id, scheduled_date?,
+    completed, completed_at?, created_at
 
   push_subscription/default
     subscription (VAPID JSON), reminder_time, updated_at
@@ -156,6 +155,12 @@ CRON_SECRET=
 - [ ] Project Settings → General → **Your apps** (web) → copy `NEXT_PUBLIC_FIREBASE_*` vars
 
 ## Key Implementation Rules
+
+**Identity system**
+- Users must have ≥1 identity to use the app — enforced by onboarding gate in auth flow.
+- Habits carry optional `identity_id` — null means untagged.
+- Identity `order` field controls display order; `reorderIdentities` updates all docs in parallel.
+- Icon stored as lucide icon name string (e.g. `"Dumbbell"`). Preset list in `app/onboarding/page.tsx`.
 
 **Bad habits = harm reduction, not cold turkey**
 - `did_it = false` = good (skipped). No streaks, no resets.

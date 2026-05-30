@@ -63,7 +63,7 @@ export function useHabits() {
     }
   }, [todayLogs])
 
-  const addHabit = useCallback(async (name: string, color: string) => {
+  const addHabit = useCallback(async (name: string, color: string, identity_id?: string) => {
     const user = auth.currentUser
     if (!user) return
 
@@ -73,8 +73,9 @@ export function useHabits() {
       user_id: user.uid,
       archived: false,
       created_at: Timestamp.now(),
+      ...(identity_id ? { identity_id } : {}),
     })
-    setHabits(prev => [...prev, { id: docRef.id, name, color, user_id: user.uid, archived: false } as Habit])
+    setHabits(prev => [...prev, { id: docRef.id, name, color, user_id: user.uid, archived: false, ...(identity_id ? { identity_id } : {}) } as Habit])
   }, [])
 
   const archiveHabit = useCallback(async (habitId: string) => {
@@ -88,29 +89,27 @@ export function useHabits() {
     return todayLogs.some(l => l.habit_id === habitId)
   }, [todayLogs])
 
-  const getStreak = useCallback((habitId: string): number => {
-    const logs = allLogs
-      .filter(l => l.habit_id === habitId)
-      .map(l => l.log_date)
-      .sort()
-      .reverse()
-
-    if (!logs.length) return 0
-
-    let streak = 0
-    const checkDate = new Date()
-
-    for (let i = 0; i < 364; i++) {
-      const dateStr = formatDate(checkDate)
-      if (logs.includes(dateStr)) {
-        streak++
-        checkDate.setDate(checkDate.getDate() - 1)
-      } else {
-        break
-      }
+  const getWeeklyRate = useCallback((habitId: string): { count: number; total: number } => {
+    const logs = allLogs.filter(l => l.habit_id === habitId).map(l => l.log_date)
+    let count = 0
+    const d = new Date()
+    for (let i = 0; i < 7; i++) {
+      if (logs.includes(formatDate(d))) count++
+      d.setDate(d.getDate() - 1)
     }
-    return streak
+    return { count, total: 7 }
   }, [allLogs])
 
-  return { habits, todayLogs, allLogs, loading, toggleHabit, addHabit, archiveHabit, isCompletedToday, getStreak, refetch: fetchData }
+  const getMonthlyRate = useCallback((habitId: string): { count: number; total: number } => {
+    const logs = allLogs.filter(l => l.habit_id === habitId).map(l => l.log_date)
+    let count = 0
+    const d = new Date()
+    for (let i = 0; i < 30; i++) {
+      if (logs.includes(formatDate(d))) count++
+      d.setDate(d.getDate() - 1)
+    }
+    return { count, total: 30 }
+  }, [allLogs])
+
+  return { habits, todayLogs, allLogs, loading, toggleHabit, addHabit, archiveHabit, isCompletedToday, getWeeklyRate, getMonthlyRate, refetch: fetchData }
 }

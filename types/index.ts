@@ -1,3 +1,15 @@
+export interface Identity {
+  id: string
+  user_id: string
+  name: string
+  description: string
+  target_vision: string
+  color: string
+  icon: string
+  order: number
+  created_at: string
+}
+
 export interface Habit {
   id: string
   user_id: string
@@ -6,6 +18,7 @@ export interface Habit {
   icon?: string
   archived: boolean
   created_at: string
+  identity_id?: string
 }
 
 export interface HabitLog {
@@ -37,24 +50,12 @@ export interface BadHabitLog {
   notes?: string
 }
 
-export interface Project {
-  id: string
-  user_id: string
-  name: string
-  color: string
-  archived: boolean
-  created_at: string
-}
-
 export interface Task {
   id: string
   user_id: string
-  project_id?: string
   title: string
   description?: string
   scheduled_date?: string
-  time_start?: string
-  time_end?: string
   completed: boolean
   completed_at?: string
   created_at: string

@@ -2,12 +2,18 @@
 
 import { useState } from 'react'
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
-import { auth } from '@/lib/firebase/client'
+import { collection, getDocs, limit, query } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+
+async function redirectAfterAuth(uid: string) {
+  const snap = await getDocs(query(collection(db, 'users', uid, 'identities'), limit(1)))
+  window.location.href = snap.empty ? '/onboarding' : '/'
+}
 
 export default function AuthPage() {
   const [email, setEmail] = useState('')
@@ -22,12 +28,15 @@ export default function AuthPage() {
     setMessage('')
 
     try {
+      let uid: string
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password)
+        const cred = await createUserWithEmailAndPassword(auth, email, password)
+        uid = cred.user.uid
       } else {
-        await signInWithEmailAndPassword(auth, email, password)
+        const cred = await signInWithEmailAndPassword(auth, email, password)
+        uid = cred.user.uid
       }
-      window.location.href = '/'
+      await redirectAfterAuth(uid)
     } catch (err: unknown) {
       const error = err as { message?: string }
       setMessage(error.message ?? 'Authentication failed')
@@ -38,8 +47,8 @@ export default function AuthPage() {
 
   async function handleGoogle() {
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
-      window.location.href = '/'
+      const cred = await signInWithPopup(auth, new GoogleAuthProvider())
+      await redirectAfterAuth(cred.user.uid)
     } catch (err: unknown) {
       const error = err as { message?: string }
       setMessage(error.message ?? 'Google sign-in failed')
