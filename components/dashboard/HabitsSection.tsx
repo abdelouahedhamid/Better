@@ -5,8 +5,13 @@ import { useHabits } from '@/hooks/useHabits'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
-export function HabitsSection() {
+interface HabitsSectionProps {
+  identityId: string | null
+}
+
+export function HabitsSection({ identityId }: HabitsSectionProps) {
   const { habits, loading, isCompletedToday, toggleHabit } = useHabits()
+  const visibleHabits = identityId ? habits.filter(h => h.identity_id === identityId) : habits
 
   if (loading) {
     return (
@@ -21,7 +26,7 @@ export function HabitsSection() {
     )
   }
 
-  if (!habits.length) {
+  if (!visibleHabits.length) {
     return (
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -33,18 +38,18 @@ export function HabitsSection() {
     )
   }
 
-  const doneCount = habits.filter(h => isCompletedToday(h.id)).length
+  const doneCount = visibleHabits.filter(h => isCompletedToday(h.id)).length
 
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Habits <span className="text-foreground font-bold">{doneCount}/{habits.length}</span>
+          Habits <span className="text-foreground font-bold">{doneCount}/{visibleHabits.length}</span>
         </h2>
         <Link href="/habits" className="text-xs text-muted-foreground hover:text-foreground transition-colors">Manage</Link>
       </div>
       <div className="space-y-2">
-        {habits.map(habit => {
+        {visibleHabits.map(habit => {
           const done = isCompletedToday(habit.id)
           return (
             <button

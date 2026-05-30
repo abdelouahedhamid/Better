@@ -12,6 +12,7 @@ const COLORS = [
   '#3b82f6', '#06b6d4',
 ]
 
+// TODO (next phase): add identity selector so habits can be tagged to an identity on creation
 interface Props {
   onAdd: (name: string, color: string) => void
   children: React.ReactNode
