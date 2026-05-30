@@ -4,6 +4,7 @@ import "./globals.css"
 import { Navbar } from "@/components/layout/Navbar"
 import { BottomNav } from "@/components/layout/BottomNav"
 import { AuthSync } from "@/components/AuthSync"
+import { AuthGuard } from "@/components/AuthGuard"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,11 +23,13 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.className} bg-background text-foreground min-h-screen`}>
         <AuthSync />
-        <Navbar />
-        <main className="md:pt-14 pb-16 md:pb-0 min-h-screen">
-          {children}
-        </main>
-        <BottomNav />
+        <AuthGuard>
+          <Navbar />
+          <main className="md:pt-14 pb-16 md:pb-0 min-h-screen">
+            {children}
+          </main>
+          <BottomNav />
+        </AuthGuard>
       </body>
     </html>
   )

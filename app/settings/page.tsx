@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { signOut } from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,23 +35,18 @@ export default function SettingsPage() {
     })
   }, [])
 
-  async function authHeader(): Promise<Record<string, string>> {
-    const user = auth.currentUser
-    if (!user) return {}
-    const token = await user.getIdToken()
-    return { Authorization: `Bearer ${token}` }
-  }
-
   async function handleToggleNotifications(enabled: boolean) {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setNotifMsg('Push notifications not supported in this browser.')
       return
     }
 
+    const user = auth.currentUser
+    if (!user) return
     setNotifStatus('loading')
 
     if (!enabled) {
-      await fetch('/api/push/subscribe', { method: 'DELETE', headers: await authHeader() })
+      await deleteDoc(doc(db, 'users', user.uid, 'push_subscription', 'default'))
       setNotifEnabled(false)
       setNotifStatus('done')
       setNotifMsg('Notifications disabled.')
@@ -75,19 +70,15 @@ export default function SettingsPage() {
         applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!) as unknown as BufferSource,
       })
 
-      const res = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...await authHeader() },
-        body: JSON.stringify({ subscription: sub.toJSON(), reminderTime }),
+      await setDoc(doc(db, 'users', user.uid, 'push_subscription', 'default'), {
+        subscription: sub.toJSON(),
+        reminder_time: reminderTime,
+        updated_at: new Date().toISOString(),
       })
 
-      if (res.ok) {
-        setNotifEnabled(true)
-        setNotifStatus('done')
-        setNotifMsg('Notifications enabled!')
-      } else {
-        throw new Error('Server error')
-      }
+      setNotifEnabled(true)
+      setNotifStatus('done')
+      setNotifMsg('Notifications enabled!')
     } catch {
       setNotifMsg('Failed to enable notifications.')
       setNotifStatus('error')
@@ -96,10 +87,11 @@ export default function SettingsPage() {
 
   async function handleUpdateTime() {
     if (!notifEnabled) return
-    await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...await authHeader() },
-      body: JSON.stringify({ reminderTime }),
+    const user = auth.currentUser
+    if (!user) return
+    await updateDoc(doc(db, 'users', user.uid, 'push_subscription', 'default'), {
+      reminder_time: reminderTime,
+      updated_at: new Date().toISOString(),
     })
     setNotifMsg('Reminder time updated.')
   }
