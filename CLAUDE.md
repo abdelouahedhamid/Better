@@ -25,7 +25,7 @@ firebase deploy --only firestore:rules
 | Auth | Firebase Auth (email/password + Google popup) |
 | Database | Firestore (subcollection-per-user) |
 | Push | Web Push API + VAPID + `web-push` npm package |
-| Hosting | Vercel |
+| Hosting | Firebase App Hosting |
 
 Dark mode: always-on via `<html className="dark">`.
 

@@ -80,3 +80,24 @@ export interface DailyScore {
   badHabitsScore: number
   total: number
 }
+
+export interface JournalEntry {
+  id: string
+  user_id: string
+  date: string
+  prompt_id: string
+  prompt_text: string
+  content: string
+  identity_id?: string
+  created_at: string
+}
+
+export interface MeditationSession {
+  id: string
+  user_id: string
+  date: string
+  duration_minutes: number
+  sound_type: 'silent' | 'brown_noise' | 'white_noise' | 'rain'
+  identity_id?: string
+  created_at: string
+}
